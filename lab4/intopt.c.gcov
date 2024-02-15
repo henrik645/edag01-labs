@@ -1,0 +1,1130 @@
+        -:    0:Source:intopt.c
+        -:    0:Graph:intopt.gcno
+        -:    0:Data:intopt.gcda
+        -:    0:Runs:2
+        -:    0:Programs:1
+        -:    1:#include <stdio.h>
+        -:    2:#include <stdlib.h>
+        -:    3:#include <math.h>
+        -:    4:#include <float.h>
+        -:    5:#include <stdbool.h>
+        -:    6:#include <string.h>
+        -:    7:
+        -:    8:#define EPSILON 1E-6
+        -:    9:
+        -:   10:typedef struct
+        -:   11:{
+        -:   12:        int m; // Constraints
+        -:   13:        int n; // Decision variables
+        -:   14:        int *var; // [n+m], 0..n - 1 are nonbasic
+        -:   15:        // [n+1] due to slack form, not standard (w/ inequalities)
+        -:   16:        double **a; // [m][n+1]
+        -:   17:        double *b; // [m]
+        -:   18:        double *x; // [n+1]
+        -:   19:        double *c; // [n]
+        -:   20:        double y;
+        -:   21:} simplex_t;
+        -:   22:
+        -:   23:typedef struct node_t
+        -:   24:{
+        -:   25:        int m; // Constraints
+        -:   26:        int n; // Decision variables
+        -:   27:        int k; // Parent branches on x_k
+        -:   28:        int h; // Branch on x_h
+        -:   29:        double xh; // x_h
+        -:   30:        double ak; // parent a_k
+        -:   31:        double bk; // parent b_k
+        -:   32:        double *min; // [n] lower bounds
+        -:   33:        double *max; // [n] upper bounds
+        -:   34:        double **a; // [m][n] A
+        -:   35:        double *b; // [m]
+        -:   36:        double *x; // [n]
+        -:   37:        double *c; // [n]
+        -:   38:        double z;
+        -:   39:        struct node_t *next; // reference to next node if in list
+        -:   40:} node_t;
+        -:   41:
+        -:   42:/* Function declarations */
+        -:   43:  
+        -:   44:double xsimplex(int m, int n, double **a, double *b, double *c, double *x, double y, int *var, int h);
+        -:   45:
+        -:   46:double simplex(int m, int n, double **a, double *b, double *c, double *x, double y);
+        -:   47:
+        -:   48:/* End of function declarations. */
+        -:   49:
+function initial_node called 2 returned 100% blocks executed 100%
+        2:   50:node_t *initial_node(int m, int n, double **a, double *b, double *c)
+        -:   51:{
+        2:   52:        node_t *p = calloc(1, sizeof(*p));
+        -:   53:        /* p->a = calloc(m+1, sizeof(*(p->a))); */
+        2:   54:        p->a = calloc(m+1, sizeof(double*));
+       26:   55:        for (int i = 0; i < m + 1; i++)
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       24:   56:                p->a[i] = calloc(n+1, sizeof(double));
+        2:   57:        p->b = calloc(m+1, sizeof(*(p->b)));
+        2:   58:        p->c = calloc(n+1, sizeof(*(p->c)));
+        -:   59:        /* p->x = calloc(m+n+1, sizeof(*(p->x))); */
+        2:   60:        p->x = calloc(n+1, sizeof(*(p->x)));
+        2:   61:        p->min = calloc(n, sizeof(*(p->min)));
+        2:   62:        p->max = calloc(n, sizeof(*(p->max)));
+        2:   63:        p->m = m;
+        2:   64:        p->n = n;
+        -:   65:
+        -:   66:        /* p->a = a; */
+       24:   67:        for (int i = 0; i < m; i++) {
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+      426:   68:                for (int j = 0; j < n; j++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+      404:   69:                        p->a[i][j] = a[i][j];
+        -:   70:                }
+        -:   71:        }
+        -:   72:
+        -:   73:        /* p->b = b; */
+       24:   74:        for (int i = 0; i < m; i++) {
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       22:   75:                p->b[i] = b[i];
+        -:   76:        }
+        -:   77:
+        -:   78:        /* p->c = c; */
+       24:   79:        for (int i =0; i < n; i++) {
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       22:   80:                p->c[i] = c[i];
+        -:   81:        }
+        -:   82:
+       24:   83:        for (int i = 0; i < n; i++) {
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       22:   84:                p->min[i] = -INFINITY;
+       22:   85:                p->max[i] = INFINITY;
+        -:   86:        }
+        -:   87:
+        2:   88:        p->next = NULL;
+        -:   89:
+        2:   90:        return p;
+        -:   91:}
+        -:   92:
+function extend called 58446 returned 100% blocks executed 100%
+    58446:   93:node_t *extend(node_t *p, int m, int n, double **a, double *b, double *c, int k, double ak, double bk)
+        -:   94:{
+        -:   95:        int i, j;
+        -:   96:
+    58446:   97:        node_t *q = calloc(1, sizeof(*q));
+    58446:   98:        q->k = k;
+    58446:   99:        q->ak = ak;
+    58446:  100:        q->bk = bk;
+        -:  101:
+    58446:  102:        if (ak > 0 && p->max[k] < INFINITY) {
+branch  0 taken 50% (fallthrough)
+branch  1 taken 50%
+branch  2 taken 48% (fallthrough)
+branch  3 taken 52%
+    13986:  103:                q->m = p->m;
+    44460:  104:        } else if (ak < 0 && p->min[k] > 0) {
+branch  0 taken 66% (fallthrough)
+branch  1 taken 34%
+branch  2 taken 19% (fallthrough)
+branch  3 taken 81%
+     5661:  105:                q->m = p->m;
+        -:  106:        } else {
+    38799:  107:                q->m = p->m + 1;
+        -:  108:        }
+        -:  109:
+    58446:  110:        q->n = p->n;
+    58446:  111:        q->h = -1;
+    58446:  112:        q->a = calloc(q->m + 1, sizeof(double*));
+  1969853:  113:        for (int i = 0; i < q->m + 1; i++)
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+  1911407:  114:                q->a[i] = calloc(q->n + 1, sizeof(double));
+    58446:  115:        q->b = calloc(q->m + 1, sizeof(double));
+    58446:  116:        q->c = calloc(q->n + 1, sizeof(double));
+    58446:  117:        q->x = calloc(q->n + 1, sizeof(double));
+    58446:  118:        q->min = calloc(n, sizeof(double));
+    58446:  119:        q->max = calloc(n, sizeof(double));
+        -:  120:
+        -:  121:        // copy p.min and p.max to q (each element)
+  1227366:  122:        for (i = 0; i < n; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+  1168920:  123:                q->min[i] = p->min[i];
+  1168920:  124:                q->max[i] = p->max[i];
+        -:  125:        }
+        -:  126:
+        -:  127:        // copy m first rows of parameter a to q.a (each element)
+  1227366:  128:        for (i = 0; i < m; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+ 24547320:  129:                for (j = 0; j < n; j++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+ 23378400:  130:                        q->a[i][j] = a[i][j];
+        -:  131:                }
+        -:  132:        }
+        -:  133:
+        -:  134:        // copy m first elements of parameter b to q.b (each element)
+  1227366:  135:        for (i = 0; i < m; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+  1168920:  136:                q->b[i] = b[i];
+        -:  137:        }
+        -:  138:
+        -:  139:        // copy parameter c to q.c (each element)
+  1227366:  140:        for (i = 0; i < n; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+  1168920:  141:                q->c[i] = c[i];
+        -:  142:        }
+        -:  143:
+    58446:  144:        if (ak > 0) {
+branch  0 taken 50% (fallthrough)
+branch  1 taken 50%
+    29223:  145:                if (q->max[k] == INFINITY || bk < q->max[k]) {
+branch  0 taken 48% (fallthrough)
+branch  1 taken 52%
+branch  2 taken 100% (fallthrough)
+branch  3 taken 0%
+    29223:  146:                        q->max[k] = bk;
+        -:  147:                }
+    29223:  148:        } else if (q->min[k] == -INFINITY || -bk > q->min[k]) {
+branch  0 taken 19% (fallthrough)
+branch  1 taken 81%
+branch  2 taken 100% (fallthrough)
+branch  3 taken 0%
+    29223:  149:                q->min[k] = -bk;
+        -:  150:        }
+        -:  151:
+  1227366:  152:        for (i = m, j = 0; j < n; j++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+  1168920:  153:                if (q->min[j] > -INFINITY) {
+branch  0 taken 24% (fallthrough)
+branch  1 taken 76%
+   275604:  154:                        q->a[i][j] = -1;
+   275604:  155:                        q->b[i] = -q->min[j];
+   275604:  156:                        i++;
+        -:  157:                }
+  1168920:  158:                if (q->max[j] < INFINITY) {
+branch  0 taken 35% (fallthrough)
+branch  1 taken 65%
+   408437:  159:                        q->a[i][j] = 1;
+   408437:  160:                        q->b[i] = q->max[j];
+   408437:  161:                        i++;
+        -:  162:                }
+        -:  163:        }
+        -:  164:
+    58446:  165:        return q;
+        -:  166:}
+        -:  167:
+function is_integer called 606642 returned 100% blocks executed 100%
+   606642:  168:bool is_integer(double *xp)
+        -:  169:{
+   606642:  170:        double x = *xp;
+   606642:  171:        double r = lround(x);
+        -:  172:
+   606642:  173:        if (fabs(r - x) < EPSILON) {
+branch  0 taken 87% (fallthrough)
+branch  1 taken 13%
+   524894:  174:                *xp = r;
+   524894:  175:                return true;
+        -:  176:        } else {
+    81748:  177:                return false;
+        -:  178:        }
+        -:  179:}
+        -:  180:
+function integer called 45190 returned 100% blocks executed 100%
+    45190:  181:bool integer(node_t *p)
+        -:  182:{
+   335630:  183:        for (int i = 0; i < p->n; i++)
+branch  0 taken 99%
+branch  1 taken 1% (fallthrough)
+   335620:  184:                if (!is_integer(&p->x[i]))
+call    0 returned 100%
+branch  1 taken 13% (fallthrough)
+branch  2 taken 87%
+    45180:  185:                        return false;
+       10:  186:        return true;
+        -:  187:}
+        -:  188:
+        -:  189:/* h is the set of nodes waiting to be explored */
+        -:  190:/* each node_t stores a reference to the next node */
+        -:  191:/* Typically this is null but in this set, each node needs */
+        -:  192:/* to have this one set. */
+        -:  193:/* h needs to be a pointer to a pointer for this */
+        -:  194:/* algorithm to be able to change it, for example when deleting */
+        -:  195:/* the first node in the set. */
+function bound called 8 returned 100% blocks executed 100%
+        8:  196:void bound(node_t *p, node_t **h, double *zp, double *x)
+        -:  197:{
+        8:  198:        if (p->z > *zp) {
+branch  0 taken 88% (fallthrough)
+branch  1 taken 13%
+        7:  199:                *zp = p->z;
+        -:  200:                // copy each element of p.x to x, save best x
+        7:  201:                double best_x = p->x[0];
+      154:  202:                for (int i = 0; i < p->n+1; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+      147:  203:                        x[i] = p->x[i];
+      147:  204:                        if (p->x[i] > best_x)
+branch  0 taken 13% (fallthrough)
+branch  1 taken 87%
+       19:  205:                                best_x = p->x[i];
+        -:  206:                }
+        -:  207:
+        -:  208:                // remove and delete all nodes q in h with q.z < p.z
+        -:  209:                // TODO: does this introduce a memory leak?
+        7:  210:                node_t *current_h = *h;
+        7:  211:                node_t *previous_h = NULL;
+        -:  212:                /* printf("Adding a node to h\n"); */
+    31004:  213:                while (current_h != NULL) {
+branch  0 taken 99%
+branch  1 taken 1% (fallthrough)
+        -:  214:                        /* printf("current_h is not NULL\n"); */
+    30990:  215:                        if (current_h->z < p->z) {
+branch  0 taken 41% (fallthrough)
+branch  1 taken 59%
+        -:  216:                                // delete it
+    12715:  217:                                if (previous_h == NULL) {
+branch  0 taken 1% (fallthrough)
+branch  1 taken 99%
+        -:  218:                                        // this is the first node in the list
+        2:  219:                                        *h = current_h->next;
+        -:  220:                                } else {
+    12713:  221:                                        previous_h->next = current_h->next;
+        -:  222:                                }
+        -:  223:                        }
+        -:  224:                        // advance to the next node
+    30990:  225:                        previous_h = current_h;
+    30990:  226:                        current_h = current_h->next;
+        -:  227:                }
+        -:  228:        }
+        8:  229:}
+        -:  230:
+function branch called 45180 returned 100% blocks executed 95%
+    45180:  231:bool branch(node_t *q, double z) {
+        -:  232:        double min, max;
+        -:  233:
+    45180:  234:        if (q->z < z)
+branch  0 taken 19% (fallthrough)
+branch  1 taken 81%
+     8613:  235:                return false;
+        -:  236:
+   271022:  237:        for (int h = 0; h < q->n; h++) {
+branch  0 taken 100%
+branch  1 taken 0% (fallthrough)
+   271022:  238:                if (!is_integer(&q->x[h])) {
+call    0 returned 100%
+branch  1 taken 13% (fallthrough)
+branch  2 taken 87%
+    36568:  239:                        if (q->min[h] == -INFINITY) {
+branch  0 taken 81% (fallthrough)
+branch  1 taken 19%
+    29582:  240:                                min = 0;
+        -:  241:                        } else {
+     6986:  242:                                min = q->min[h];
+        -:  243:                        }
+        -:  244:
+    36568:  245:                        max = q->max[h];
+        -:  246:
+    36568:  247:                        if (floor(q->x[h]) < min || ceil(q->x[h]) > max) {
+branch  0 taken 99% (fallthrough)
+branch  1 taken 1%
+branch  2 taken 0% (fallthrough)
+branch  3 taken 100%
+        1:  248:                                continue;
+        -:  249:                        }
+        -:  250:
+    36567:  251:                        q->h = h;
+    36567:  252:                        q->xh = q->x[h];
+        -:  253:
+        -:  254:                        // delete a, b, c, x of q
+  1214129:  255:                        for (int i = 0; i < q->m+1; i++) { // this was just "m" before;
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+  1177562:  256:                                free(q->a[i]);
+        -:  257:                        }
+    36567:  258:                        free(q->a);
+        -:  259:
+    36567:  260:                        free(q->b);
+    36567:  261:                        free(q->c);
+    36567:  262:                        free(q->x);
+        -:  263:
+    36567:  264:                        return true;
+        -:  265:                }
+        -:  266:        }
+        -:  267:
+    #####:  268:        return false;
+        -:  269:}
+        -:  270:
+function succ called 58446 returned 100% blocks executed 95%
+    58446:  271:void succ(node_t *p,
+        -:  272:                node_t **h, // or int?
+        -:  273:                int m,
+        -:  274:                int n,
+        -:  275:                double **a,
+        -:  276:                double *b,
+        -:  277:                double *c,
+        -:  278:                int k,
+        -:  279:                double ak,
+        -:  280:                double bk,
+        -:  281:                double *zp,
+        -:  282:                double *x)
+        -:  283:{
+    58446:  284:        node_t *q = extend(p, m, n, a, b, c, k, ak, bk);
+call    0 returned 100%
+        -:  285:
+    58446:  286:        if (q == NULL) return;
+branch  0 taken 0% (fallthrough)
+branch  1 taken 100%
+        -:  287:
+    58446:  288:        q->z = simplex(q->m, q->n, q->a, q->b, q->c, q->x, 0);
+call    0 returned 100%
+        -:  289:
+    58446:  290:        if (isfinite(q->z)) {
+branch  0 taken 77% (fallthrough)
+branch  1 taken 23%
+    45187:  291:                if (integer(q)) {
+call    0 returned 100%
+branch  1 taken 1% (fallthrough)
+branch  2 taken 99%
+        -:  292:                        /* bound(q, &h, zp, x); */
+        8:  293:                        bound(q, h, zp, x);
+call    0 returned 100%
+    45179:  294:                } else if (branch(q, *zp)) {
+call    0 returned 100%
+branch  1 taken 81% (fallthrough)
+branch  2 taken 19%
+        -:  295:                        // add q to h
+        -:  296:                        // advance to end of list
+        -:  297:                        /* node_t *current_h = *h; */
+        -:  298:                        /* printf("the next node is %p\n", h->next); */
+        -:  299:
+    36566:  300:                        if (*h == NULL) { // empty set
+branch  0 taken 1% (fallthrough)
+branch  1 taken 99%
+        2:  301:                                *h = q;
+        -:  302:                        } else {
+    36564:  303:                                node_t *current_h = *h;
+        -:  304:
+168335053:  305:                                while (current_h->next != NULL) {
+branch  0 taken 99%
+branch  1 taken 1% (fallthrough)
+        -:  306:                                        /* printf("advancing through nodes\n"); */
+168261925:  307:                                        current_h = current_h->next;
+        -:  308:                                }
+    36564:  309:                                current_h->next = q;
+        -:  310:                        }
+    36566:  311:                        return;
+        -:  312:                }
+        -:  313:        }
+        -:  314:
+    21880:  315:        free(q);
+        -:  316:}
+        -:  317:
+function intopt called 2 returned 100% blocks executed 95%
+        2:  318:double intopt(int m, int n, double **a, double *b, double *c, double *x)
+        -:  319:{
+        2:  320:        node_t *p = initial_node(m, n, a, b, c);
+call    0 returned 100%
+        2:  321:        node_t *h = p;
+        2:  322:        double z = -INFINITY; // best integer solution found so far
+        -:  323:
+        2:  324:        p->z = simplex(p->m, p->n, p->a, p->b, p->c, p->x, 0);
+call    0 returned 100%
+        -:  325:
+        2:  326:        if (integer(p) || !isfinite(p->z)) {
+call    0 returned 100%
+branch  1 taken 50% (fallthrough)
+branch  2 taken 50%
+branch  3 taken 0% (fallthrough)
+branch  4 taken 100%
+        1:  327:                z = p->z;
+        1:  328:                if (integer(p)) {
+call    0 returned 100%
+branch  1 taken 100% (fallthrough)
+branch  2 taken 0%
+        3:  329:                        for (int i = 0; i < n; i++) {
+branch  0 taken 67%
+branch  1 taken 33% (fallthrough)
+        2:  330:                                x[i] = p->x[i];
+        -:  331:                        }
+        -:  332:
+        1:  333:                        free(p);
+        1:  334:                        return z;
+        -:  335:                }
+        -:  336:        }
+        -:  337:
+        1:  338:        branch(p, z);
+call    0 returned 100%
+        -:  339:
+        -:  340:        /* node_t *previous_h = NULL; */
+        -:  341:
+    29225:  342:        while (h != NULL) {
+branch  0 taken 99%
+branch  1 taken 1% (fallthrough)
+        -:  343:                // take p from h
+    29223:  344:                node_t *p = h;
+    29223:  345:                h = h->next;
+        -:  346:
+    29223:  347:                succ(p, &h, m, n, a, b, c, p->h, 1, floor(p->xh), &z, x);
+call    0 returned 100%
+    29223:  348:                succ(p, &h, m, n, a, b, c, p->h, -1, -ceil(p->xh), &z, x);
+call    0 returned 100%
+        -:  349:
+        -:  350:                // TODO: delete p
+        -:  351:        }
+        -:  352:
+        1:  353:        if (z == -INFINITY) {
+branch  0 taken 0% (fallthrough)
+branch  1 taken 100%
+    #####:  354:                return NAN;
+        -:  355:        } else {
+        1:  356:                return z;
+        -:  357:        }
+        -:  358:
+        -:  359:}
+        -:  360:
+        -:  361:
+        -:  362:
+        -:  363:/* Initializes a simplex with the given values, */
+        -:  364:/* initializing s.var if not already done. */
+        -:  365:/* Returns the index of the lowest b value */
+function init called 116876 returned 100% blocks executed 100%
+   116876:  366:int init(simplex_t *s, int m, int n, double **a, double *b, double *c, double *x, double y, int *var)
+        -:  367:{
+        -:  368:        int i, k;
+        -:  369:
+   116876:  370:        s->m = m;
+   116876:  371:        s->n = n;
+   116876:  372:        s->a = a;
+   116876:  373:        s->b = b;
+   116876:  374:        s->c = c;
+   116876:  375:        s->x = x;
+   116876:  376:        s->y = y;
+   116876:  377:        s->var = var;
+        -:  378:
+        -:  379:        /* allocate s.var if not already done, */
+        -:  380:        /* setting each s.var to 0, 1, ..., m + n */
+   116876:  381:        if (s->var == NULL) {
+branch  0 taken 50% (fallthrough)
+branch  1 taken 50%
+    58448:  382:                s->var = calloc(m + n + 1, sizeof(int));
+        -:  383:                /* s->var = malloc((m + n + 1) * sizeof(int)); */
+  3080373:  384:                for (i = 0; i < m + n; i++) {
+branch  0 taken 98%
+branch  1 taken 2% (fallthrough)
+  3021925:  385:                        s->var[i] = i;
+        -:  386:                }
+        -:  387:        }
+        -:  388:
+        -:  389:        /* return the index of the lowest b value */
+   116876:  390:        k = 0;
+  3705462:  391:        for (i = 1; i < m; i++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+  3588586:  392:                if (b[i] < b[k]) {
+branch  0 taken 13% (fallthrough)
+branch  1 taken 87%
+   477254:  393:                        k = i;
+        -:  394:                }
+        -:  395:        }
+        -:  396:
+   116876:  397:        return k;
+        -:  398:}
+        -:  399:
+function select_nonbasic called 3296163 returned 100% blocks executed 100%
+  3296163:  400:int select_nonbasic(simplex_t *s)
+        -:  401:{
+        -:  402:        int i;
+ 24482157:  403:        for (i = 0; i < s->n; i++) {
+branch  0 taken 99%
+branch  1 taken 1% (fallthrough)
+ 24378540:  404:                if (s->c[i] > EPSILON) {
+branch  0 taken 13% (fallthrough)
+branch  1 taken 87%
+  3192546:  405:                        return i;
+        -:  406:                }
+        -:  407:        }
+   103617:  408:        return -1;
+        -:  409:}
+        -:  410:
+function pivot called 3288725 returned 100% blocks executed 100%
+  3288725:  411:void pivot(simplex_t *s, int row, int col)
+        -:  412:{
+  3288725:  413:        double **a = s->a;
+  3288725:  414:        double *b = s->b;
+  3288725:  415:        double *c = s->c;
+  3288725:  416:        int m = s->m;
+  3288725:  417:        int n = s->n;
+        -:  418:        int i, j, t;
+        -:  419:
+  3288725:  420:        t = s->var[col];
+  3288725:  421:        s->var[col] = s->var[n+row];
+  3288725:  422:        s->var[n+row] = t;
+  3288725:  423:        s->y = s->y + c[col] * b[row] / a[row][col];
+        -:  424:
+ 71348600:  425:        for (i = 0; i < n; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+ 68059875:  426:                if (i != col) {
+branch  0 taken 95% (fallthrough)
+branch  1 taken 5%
+ 64771150:  427:                        c[i] = c[i] - c[col] * a[row][i] / a[row][col];
+        -:  428:                }
+        -:  429:        }
+        -:  430:
+  3288725:  431:        c[col] = - (c[col] / a[row][col]);
+        -:  432:
+107991253:  433:        for (i = 0; i < m; i++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+104702528:  434:                if (i != row) {
+branch  0 taken 97% (fallthrough)
+branch  1 taken 3%
+101413803:  435:                        b[i] = b[i] - a[i][col] * b[row] / a[row][col];
+        -:  436:                }
+        -:  437:        }
+        -:  438:
+107991253:  439:        for (i = 0; i < m; i++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+104702528:  440:                if (i != row) {
+branch  0 taken 97% (fallthrough)
+branch  1 taken 3%
+2200668849:  441:                        for (j = 0; j < n; j++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+2099255046:  442:                                if (j != col) {
+branch  0 taken 95% (fallthrough)
+branch  1 taken 5%
+1997841243:  443:                                        a[i][j] = a[i][j] - a[i][col] * a[row][j] / a[row][col];
+        -:  444:                                }
+        -:  445:                        }
+        -:  446:                }
+        -:  447:        }
+        -:  448:
+107991253:  449:        for (i = 0; i < m; i++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+104702528:  450:                if (i != row) {
+branch  0 taken 97% (fallthrough)
+branch  1 taken 3%
+101413803:  451:                        a[i][col] = - (a[i][col] / a[row][col]);
+        -:  452:                }
+        -:  453:        }
+        -:  454:
+ 71348600:  455:        for (i = 0; i < n; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+ 68059875:  456:                if (i != col) {
+branch  0 taken 95% (fallthrough)
+branch  1 taken 5%
+ 64771150:  457:                        a[row][i] = a[row][i] / a[row][col];
+        -:  458:                }
+        -:  459:        }
+        -:  460:
+  3288725:  461:        b[row] = b[row] / a[row][col];
+  3288725:  462:        a[row][col] = 1 / a[row][col];
+  3288725:  463:}
+        -:  464:
+function prepare called 58428 returned 100% blocks executed 100%
+    58428:  465:void prepare(simplex_t *s, int k)
+        -:  466:{
+    58428:  467:        int m = s->m;
+    58428:  468:        int n = s->n;
+        -:  469:        int i;
+        -:  470:
+        -:  471:        // make room for x_m+n at s.var[n] by moving s.var[n..n+m-1] one
+        -:  472:        // step to the right.
+        -:  473:        
+  1910907:  474:        for (i = m + n; i > n; i--) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+  1852479:  475:                s->var[i] = s->var[i-1];
+        -:  476:        }
+        -:  477:
+    58428:  478:        s->var[n] = m + n;
+        -:  479:        // add x_m+n to each constraint
+    58428:  480:        n++;
+        -:  481:
+  1910907:  482:        for (i = 0; i < m; i++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+  1852479:  483:                s->a[i][n-1] = -1;
+        -:  484:        }
+        -:  485:
+    58428:  486:        s->x = calloc(m + n, sizeof(*s->x));
+    58428:  487:        s->c = calloc(n, sizeof(*s->c));
+        -:  488:
+    58428:  489:        s->c[n-1] = -1;
+    58428:  490:        s->n = n;
+        -:  491:
+    58428:  492:        pivot(s, k, n - 1);
+call    0 returned 100%
+    58428:  493:}
+        -:  494:
+        -:  495:/* returns 0 if the system is infeasible, */
+        -:  496:/*         1 if it is feasible */
+function initial called 116876 returned 100% blocks executed 100%
+   116876:  497:int initial(simplex_t *s, int m, int n, double **a, double *b, double *c, double *x, double y, int *var)
+        -:  498:{
+        -:  499:        int i, j, k;
+        -:  500:        double w;
+        -:  501:
+   116876:  502:        k = init(s, m, n, a, b, c, x, y, var);
+call    0 returned 100%
+        -:  503:
+        -:  504:        /* if the lowest b coefficient is non-negative, */
+        -:  505:        /* the system is feasible */
+   116876:  506:        if (b[k] >= 0) {
+branch  0 taken 50% (fallthrough)
+branch  1 taken 50%
+    58448:  507:                return 1; // feasible
+        -:  508:        }
+        -:  509:
+    58428:  510:        prepare(s, k);
+call    0 returned 100%
+        -:  511:
+    58428:  512:        n = s->n;
+    58428:  513:        s->y = xsimplex(m, n, s->a, s->b, s->c, s->x, 0, s->var, 1);
+call    0 returned 100%
+        -:  514:
+  2603942:  515:        for (i = 0; i < m + n; i++) {
+branch  0 taken 100%
+branch  1 taken 0% (fallthrough)
+  2603942:  516:                if (s->var[i] == m + n - 1) {
+branch  0 taken 2% (fallthrough)
+branch  1 taken 98%
+    58428:  517:                        if (fabs(s->x[i]) > EPSILON) {
+branch  0 taken 23% (fallthrough)
+branch  1 taken 77%
+    13259:  518:                                free(s->x);
+    13259:  519:                                free(s->c);
+    13259:  520:                                return 0; // infeasible
+        -:  521:                        } else {
+    45169:  522:                                break;
+        -:  523:                        }
+        -:  524:                }
+        -:  525:        }
+        -:  526:
+    45169:  527:        if (i >= n) {
+branch  0 taken 84% (fallthrough)
+branch  1 taken 16%
+        -:  528:                // x_n+m is basic. find good non-basic
+   830522:  529:                for (j = k = 0; k < n; k++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+   792771:  530:                        if (fabs(s->a[i-n][k]) > fabs(s->a[i-n][j])) {
+branch  0 taken 11% (fallthrough)
+branch  1 taken 89%
+    90054:  531:                                j = k;
+        -:  532:                        }
+        -:  533:                }
+    37751:  534:                pivot(s, i-n, j);
+call    0 returned 100%
+    37751:  535:                i = j;
+        -:  536:        }
+        -:  537:
+    45169:  538:        if (i < n - 1) {
+branch  0 taken 99% (fallthrough)
+branch  1 taken 1%
+        -:  539:                // x_n+m is nonbasic and not last. swap columns i and n-1
+    45054:  540:                k = s->var[i];
+    45054:  541:                s->var[i] = s->var[n-1];
+    45054:  542:                s->var[n-1] = k;
+        -:  543:                
+  1464706:  544:                for (k = 0; k < m; k++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+  1419652:  545:                        w = s->a[k][n-1];
+  1419652:  546:                        s->a[k][n-1] = s->a[k][i];
+  1419652:  547:                        s->a[k][i] = w;
+        -:  548:                }
+        -:  549:        } else {
+        -:  550:                // x_n+m is nonbasic and last. forget it
+        -:  551:        }
+    45169:  552:        free(s->c);
+    45169:  553:        s->c = c;
+    45169:  554:        s->y = y;
+        -:  555:
+  1468243:  556:        for (k = n - 1; k < n + m - 1; k++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+  1423074:  557:                s->var[k] = s->var[k+1];
+        -:  558:        }
+        -:  559:
+        -:  560:        /* Previously */
+        -:  561:        /* s->n = s->n - 1; */
+        -:  562:        /* n = s->n; */
+        -:  563:
+        -:  564:
+        -:  565:        /* n = s->n - 1; */
+        -:  566:        /* s->n = s->n - 1; */
+        -:  567:
+    45169:  568:        n = s->n = s->n - 1;
+        -:  569:
+        -:  570:        /* n = s->n = s->n - 1; */
+        -:  571:
+    45169:  572:        double *t = calloc(n, sizeof(*t));
+        -:  573:
+   948549:  574:        for (k = 0; k < n; k++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+ 16314195:  575:                for (j = 0; j < n; j++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+ 15784282:  576:                        if (k == s->var[j]) {
+branch  0 taken 2% (fallthrough)
+branch  1 taken 98%
+        -:  577:                                // x_k is nonbasic. add c_k
+   373467:  578:                                t[j] += s->c[k];
+   373467:  579:                                goto next_k;
+        -:  580:                        }
+        -:  581:                }
+        -:  582:                // x_k is basic
+  8736832:  583:                for (j = 0; j < m; j++) {
+branch  0 taken 100%
+branch  1 taken 0% (fallthrough)
+  8736832:  584:                        if (s->var[n+j] == k) {
+branch  0 taken 6% (fallthrough)
+branch  1 taken 94%
+        -:  585:                                // x_k is at row j
+   529913:  586:                                break;
+        -:  587:                        }
+        -:  588:                }
+        -:  589:
+   529913:  590:                s->y += s->c[k] * s->b[j];
+        -:  591:
+ 11128173:  592:                for (i = 0; i < n; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+ 10598260:  593:                        t[i] -= s->c[k] * s->a[j][i];
+        -:  594:                }
+   529913:  595:next_k:;
+        -:  596:        }
+        -:  597:
+   948549:  598:        for (i = 0; i < n; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+   903380:  599:                s->c[i] = t[i];
+        -:  600:        }
+        -:  601:
+    45169:  602:        free(t);
+    45169:  603:        free(s->x);
+    45169:  604:        return 1;
+        -:  605:}
+        -:  606:
+function xsimplex called 116876 returned 100% blocks executed 97%
+   116876:  607:double xsimplex(int m, int n, double **a, double *b, double *c, double *x, double y, int *var, int h)
+        -:  608:{
+        -:  609:        simplex_t s;
+        -:  610:        int i, row, col;
+        -:  611:
+        -:  612:        /* if the system is not feasible, free s.var and */
+        -:  613:        /* return NaN */
+   116876:  614:        if (!initial(&s, m, n, a, b, c, x, y, var)) {
+call    0 returned 100%
+branch  1 taken 11% (fallthrough)
+branch  2 taken 89%
+    13259:  615:                free(s.var);
+    13259:  616:                return NAN;
+        -:  617:        }
+        -:  618:
+  3399780:  619:        while ((col = select_nonbasic(&s)) >= 0) {
+call    0 returned 100%
+branch  1 taken 97%
+branch  2 taken 3% (fallthrough)
+  3192546:  620:                row = -1;
+104843883:  621:                for (i = 0; i < m; i++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+101651337:  622:                        if ((a[i][col] > EPSILON) &&
+branch  0 taken 51% (fallthrough)
+branch  1 taken 49%
+branch  2 taken 94% (fallthrough)
+branch  3 taken 6%
+ 48517657:  623:                                        (row < 0 || (b[i] / a[i][col]) < (b[row] / a[row][col]))) {
+branch  0 taken 17% (fallthrough)
+branch  1 taken 83%
+ 11339413:  624:                                row = i;
+        -:  625:                        }
+        -:  626:                }
+        -:  627:
+  3192546:  628:                if (row < 0) {
+branch  0 taken 0% (fallthrough)
+branch  1 taken 100%
+    #####:  629:                        free(s.var);
+    #####:  630:                        return INFINITY;
+        -:  631:                }
+  3192546:  632:                pivot(&s, row, col);
+call    0 returned 100%
+        -:  633:        }
+        -:  634:
+   103617:  635:        if (h == 0) {
+branch  0 taken 44% (fallthrough)
+branch  1 taken 56%
+   948951:  636:                for (i = 0; i < n; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+   903762:  637:                        if (s.var[i] < n) {
+branch  0 taken 31% (fallthrough)
+branch  1 taken 69%
+   280813:  638:                                x[s.var[i]] = 0;
+        -:  639:                        }
+        -:  640:                }
+        -:  641:
+  1468767:  642:                for (i = 0; i < m; i++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+  1423578:  643:                        if (s.var[n+i] < n) {
+branch  0 taken 44% (fallthrough)
+branch  1 taken 56%
+   622949:  644:                                x[s.var[n+i]] = s.b[i];
+        -:  645:                        }
+        -:  646:                }
+        -:  647:
+    45189:  648:                free(s.var);
+        -:  649:        } else {
+  1285416:  650:                for (i = 0; i < n; i++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+  1226988:  651:                        x[i] = 0;
+        -:  652:                }
+  1910907:  653:                for (i = n; i < n + m; i++) {
+branch  0 taken 97%
+branch  1 taken 3% (fallthrough)
+  1852479:  654:                        x[i] = s.b[i-n];
+        -:  655:                }
+        -:  656:        }
+        -:  657:
+   103617:  658:        return s.y;
+        -:  659:}
+        -:  660:
+        -:  661:
+function simplex called 58448 returned 100% blocks executed 100%
+    58448:  662:double simplex(int m, int n, double **a, double *b, double *c, double *x, double y)
+        -:  663:{
+    58448:  664:        return xsimplex(m, n, a, b, c, x, y, NULL, 0);
+call    0 returned 100%
+        -:  665:}
+        -:  666:
+        -:  667:                                
+function alloc_program called 0 returned 0% blocks executed 0%
+    #####:  668:simplex_t alloc_program(int m, int n)
+        -:  669:{
+        -:  670:        simplex_t s;
+        -:  671:
+        -:  672:        int i;
+        -:  673:
+    #####:  674:        s.m = m;
+    #####:  675:        s.n = n;
+        -:  676: 
+    #####:  677:        s.var = calloc(n + m, sizeof(*s.var));
+        -:  678:
+    #####:  679:        s.a = calloc(m, sizeof(*s.a));
+    #####:  680:        for (i = 0; i < m; i++)
+branch  0 never executed
+branch  1 never executed
+    #####:  681:                s.a[i] = calloc(n + 1, sizeof(*s.a[i]));
+        -:  682:
+    #####:  683:        s.b = calloc(m, sizeof(*s.b));
+    #####:  684:        s.x = calloc(n + 1, sizeof(*s.x));
+    #####:  685:        s.c = calloc(n, sizeof(*s.c));
+    #####:  686:        s.y = 0;
+        -:  687:
+    #####:  688:        return s;
+        -:  689:}
+        -:  690:
+function free_program called 0 returned 0% blocks executed 0%
+    #####:  691:void free_program(simplex_t p)
+        -:  692:{
+    #####:  693:        free(p.var);
+        -:  694:
+    #####:  695:        for (int i = 0; i < p.m; i++)
+branch  0 never executed
+branch  1 never executed
+    #####:  696:                free(p.a[i]);
+    #####:  697:        free(p.a);
+        -:  698:
+    #####:  699:        free(p.b);
+    #####:  700:        free(p.x);
+    #####:  701:        free(p.c);
+    #####:  702:}
+        -:  703:
+function read_program called 2 returned 100% blocks executed 100%
+        2:  704:void read_program(int m, int n, double **a, double *b, double *c)
+        -:  705:{
+        -:  706:        /* int n = p->n; */
+        -:  707:        /* int m = p->m; */
+        -:  708:
+        -:  709:        // Read 'c' row
+       24:  710:        for (int j = 0; j < n; j++) {
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       22:  711:                scanf("%lf", &c[j]);
+call    0 returned 100%
+        -:  712:        }
+        -:  713:
+        -:  714:        // Read 'a' rows
+       24:  715:        for (int i = 0; i < m; i++) {
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+        -:  716:                // Read one 'a' row
+      426:  717:                for (int j = 0; j < n; j++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+      404:  718:                        scanf("%lf", &a[i][j]);
+call    0 returned 100%
+        -:  719:                }
+        -:  720:                // set slack variable coefficient to 1 initially
+        -:  721:                // not sure if necessary?
+       22:  722:                a[i][n] = 1;
+        -:  723:
+       22:  724:                scanf("\n");
+call    0 returned 100%
+        -:  725:        }
+        -:  726:
+        -:  727:        // Read 'b' row
+       24:  728:        for (int i = 0; i < m; i++) {
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       22:  729:                scanf("%lf", &b[i]);
+call    0 returned 100%
+        -:  730:        }
+        2:  731:}
+        -:  732:
+function print_separator called 4 returned 100% blocks executed 100%
+        4:  733:static void print_separator(int width)
+        -:  734:{
+        -:  735:        int i;
+        -:  736:
+      712:  737:        for (i = 0; i < width; i++) {
+branch  0 taken 99%
+branch  1 taken 1% (fallthrough)
+      708:  738:                printf("-");
+call    0 returned 100%
+        -:  739:        }
+        4:  740:        printf("\n");
+call    0 returned 100%
+        4:  741:}
+        -:  742:
+function print_program called 2 returned 100% blocks executed 100%
+        2:  743:void print_program(simplex_t p)
+        -:  744:{
+        2:  745:        printf("m = %d, n = %d\n\n", p.m, p.n);
+call    0 returned 100%
+        -:  746:
+        2:  747:        printf("max z = ");
+call    0 returned 100%
+       24:  748:        for (int j = 0; j < p.n; j++) {
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       22:  749:                printf("%+10.3f x%d", p.c[j], j + 1);
+call    0 returned 100%
+        -:  750:        }
+        2:  751:        printf("\n");
+call    0 returned 100%
+        -:  752:
+        2:  753:        print_separator(13 * (p.n + 1) + 21);
+call    0 returned 100%
+        -:  754:
+       24:  755:        for (int i = 0; i < p.m; i++) {
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       22:  756:                printf("        ");
+call    0 returned 100%
+      448:  757:                for (int j = 0; j < p.n + 1; j++) {
+branch  0 taken 95%
+branch  1 taken 5% (fallthrough)
+      426:  758:                        printf("%+10.3f x%d", p.a[i][j], j + 1);
+call    0 returned 100%
+        -:  759:                }
+        -:  760:
+        -:  761:                /* printf(" \u2264 %10.3f\n", p.b[i]); */
+       22:  762:                printf(" = %10.3f\n", p.b[i]);
+call    0 returned 100%
+        -:  763:        }
+        -:  764:
+        2:  765:        print_separator(13 * (p.n + 1) + 21);
+call    0 returned 100%
+        2:  766:}
+        -:  767:
+        -:  768:#ifdef LOCAL
+function main called 2 returned 100% blocks executed 95%
+        2:  769:int main(int argc, char **argv) {
+        -:  770:        simplex_t s;
+        -:  771:        int m, n;
+        -:  772:        /* double y; */
+        -:  773:        double result;
+        -:  774:
+        -:  775:        /* int *var = NULL; // var can be left to NULL without problem */
+        -:  776:
+        2:  777:        scanf("%d %d\n", &m, &n);
+call    0 returned 100%
+        -:  778:
+        2:  779:        s.a = calloc(m, sizeof(**s.a));
+       24:  780:        for (int i = 0; i < m; i++)
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       22:  781:                s.a[i] = calloc(n+1, sizeof(*s.a[i]));
+        2:  782:        s.b = calloc(m, sizeof(*s.b));
+        2:  783:        s.c = calloc(n, sizeof(*s.c));
+        2:  784:        s.x = calloc(n + 1, sizeof(*s.x));
+        2:  785:        s.y = 0;
+        -:  786:
+        2:  787:        s.m = m;
+        2:  788:        s.n = n;
+        2:  789:        s.var = NULL;
+        -:  790:
+        2:  791:        read_program(m, n, s.a, s.b, s.c);
+call    0 returned 100%
+        -:  792:
+        2:  793:        print_program(s);
+call    0 returned 100%
+        -:  794:
+        2:  795:        printf("Solving program...\n");
+call    0 returned 100%
+        -:  796:
+        2:  797:        if (argc == 2 && strcmp(argv[1], "-i") == 0) {
+branch  0 taken 100% (fallthrough)
+branch  1 taken 0%
+branch  2 taken 100% (fallthrough)
+branch  3 taken 0%
+        -:  798:                // integer solution
+        2:  799:                printf("Using branch-and-bound...\n");
+call    0 returned 100%
+        -:  800:
+        2:  801:                result = intopt(s.m, s.n, s.a, s.b, s.c, s.x);
+call    0 returned 100%
+        -:  802:        } else {
+    #####:  803:                result = simplex(s.m, s.n, s.a, s.b, s.c, s.x, s.y);
+call    0 never executed
+        -:  804:        }
+        -:  805:
+        -:  806:        /* print_program(s); */
+        -:  807:
+        2:  808:        printf("z* = %f\n", result);
+call    0 returned 100%
+       26:  809:        for (int i = 0; i < n + 1; i++) {
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       24:  810:                printf("x*_%d = %f\n", i, s.x[i]);
+call    0 returned 100%
+        -:  811:        }
+        -:  812:
+        -:  813:        /* Free all allocations */
+       24:  814:        for (int i = 0; i < m; i++)
+branch  0 taken 92%
+branch  1 taken 8% (fallthrough)
+       22:  815:                free(s.a[i]);
+        2:  816:        free(s.a);
+        2:  817:        free(s.b);
+        2:  818:        free(s.c);
+        2:  819:        free(s.x);
+        -:  820:}
+        -:  821:#endif

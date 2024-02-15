@@ -1,0 +1,44 @@
+# Lab 3 notes
+
+## Question 2
+
+This is expressed as a new constraint:
+
+-1x0 -1x1 <= -5
+
+The addition of this new constraint does not affect the optimal solution, because the optimal solution (x1, x2) = (4, 6) is above this line.
+
+## Question 5
+
+All heap-allocated memory is freed.
+
+## Question 6
+
+Valgrind complains about the use of an uninitialized value.
+
+## Question 7
+
+Valgrind keeps track of local variables, saying that the uninitialized variable was stack-allocated.
+
+## Question 8
+
+Valgrind outputs the following:
+
+*** stack smashing detected ***: <unknown> terminated                                                
+
+However, it doesn't state which variable is affected
+or on which line it happened.
+
+## Question 9
+
+No, Valgrind does not report on index-out-of-bounds for a global array.
+
+## Question 10
+
+## Local variable
+
+ASan reports a "stack buffer overflow", on what line it occurred, which frame and thread the stack belongs to, as well as which local variables (and their order in memory) are in the frame.
+
+### Global variable
+
+ASan reports a "global buffer overflow" at an address located 0 bytes from global variable "global_array", which line is the faulty one, and on which line the variable is declared.
