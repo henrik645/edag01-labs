@@ -4,13 +4,118 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define BUF_SIZE 100
+#define MAX_WORD_LEN 100
 
-typedef struct word_list_t
+typedef struct WordList WordList;
+struct WordList
 {
-        char word[BUF_SIZE];
-        struct word_list_t *next;
-} word_list_t;
+        char word[MAX_WORD_LEN];
+        int count;
+        WordList *next;
+};
+
+WordList *WordListNew(char *word)
+{
+        WordList *ret = malloc(sizeof(WordList));
+        ret->word[0] = '\0';
+        strncat(ret->word, word, MAX_WORD_LEN);
+        ret->count = 1;
+        ret->next = NULL;
+        return ret;
+}
+
+// returns true if word was added,
+// false if it was simply incremented
+bool WordListAppend(WordList **head, char *word)
+{
+        if (*head == NULL)
+        {
+                *head = WordListNew(word);
+        }
+        else
+        {
+                // check to see if it is already in the list
+                for (WordList *node = *head; node != NULL; node = node->next)
+                {
+                        if (!strcmp(node->word, word))
+                        {
+                                node->count++;
+                                return false;
+                        }
+                }
+
+                WordList *node = *head;
+                while (node->next != NULL) node = node->next;
+                node->next = WordListNew(word);
+        }
+
+        return true;
+}
+
+// returns true if word present and could be deleted,
+// false otherwise.
+bool WordListRemove(WordList** list, char *word)
+{
+        WordList *temp = *list;
+        WordList *prev = NULL;
+        if (temp == NULL) return false;
+
+        if (!strcmp(temp->word, word))
+        {
+                *list = temp->next;
+                free(temp);
+                return true;
+        }
+
+        while (temp && !!strcmp(temp->word, word))
+        {
+                prev = temp;
+                temp = temp->next;
+        }
+
+        if (temp == NULL)
+                // word not present
+                return false;
+
+        prev->next = temp->next;
+        free(temp);
+        return true;
+}
+
+void WordListPrint(WordList *list)
+{
+        int i = 1;
+        for (WordList *node = list; node != NULL; node = node->next, i++)
+                printf("%3d\t%s\n", i, node->word);
+}
+
+void WordListFree(WordList **list)
+{
+        WordList *node = *list;
+        while (node != NULL)
+        {
+                WordList *next = node->next;
+                free(node);
+                node = next;
+        }
+}
+
+void WordListPrintResult(WordList *list)
+{
+        char word[MAX_WORD_LEN];
+        int max_count = 0;
+        for (WordList *node = list; node != NULL; node = node->next)
+        {
+                if (node->count > max_count)
+                {
+                        strncpy(word, node->word, MAX_WORD_LEN);
+                        max_count = node->count;
+                }
+        }
+
+        if (max_count < 1) printf("no input\n");
+        else printf("result: %s %d\n", word, max_count);
+}
 
 bool is_prime(int n)
 {
@@ -22,82 +127,49 @@ bool is_prime(int n)
         return true;
 }
 
-void add_to_list(word_list_t **list, char *word)
+void strip_newline(char *s)
 {
-        if (*list == NULL) {
-                *list = calloc(1, sizeof(word_list_t));
-                memcpy((*list)->word, word, BUF_SIZE);
-                (*list)->next = NULL;
-        } else {
-                word_list_t *curr_word = *list;
-                while (curr_word->next != NULL) {
-                        curr_word = curr_word->next;
-                }
-                word_list_t *new_word = calloc(1, sizeof(word_list_t));
-                memcpy(new_word->word, word, BUF_SIZE);
-                new_word->next = NULL;
-                curr_word->next = new_word;
-        }
-}
-
-bool remove_from_list(word_list_t **list, char *word)
-{
-        if (*list == NULL) return false; // empty list, nothing to remove
-        word_list_t *curr = *list;
-        word_list_t *prev = NULL;
-        while (curr != NULL) {
-                if (strncmp(word, curr->word, BUF_SIZE) == 0) {
-                        if (prev == NULL) {
-                                // first element
-                                *list = curr->next;
-                        } else {
-                                // skip this one
-                                prev->next = curr->next;
-                        }
-                        // true for successful removal
-                        return true;
-                }
-                prev = curr;
-                curr = curr->next;
-        }
-
-        // false for unsuccessful removal (not found)
-        return false;
-}
-
-void print_list(word_list_t *list)
-{
-        printf("start printout\n\n");
-        while (list != NULL) {
-                printf("%s\n", list->word);
-                list = list->next;
-        }
-        printf("\nend printout\n");
+        s[strcspn(s, "\n")] = '\0';
 }
 
 int main(void)
 {
-      char buffer[BUF_SIZE]; 
+      char buffer[MAX_WORD_LEN]; 
       int curr_line = 1;
-      word_list_t *list = NULL;
+      WordList *list = NULL;
 
-      /* Testing list adding and removal */ 
-      /* add_to_list(&list, "hejsan"); */
-      /* add_to_list(&list, "svejsan"); */
-      /* add_to_list(&list, "abc"); */
-      /* print_list(list); */
-      /* remove_from_list(&list, "abc"); */
-      /* print_list(list); */
+      while (fgets(buffer, sizeof(buffer), stdin))
+      {
+              strip_newline(buffer);
 
-      while (fgets(buffer, sizeof(buffer), stdin)) {
-              if (strcmp(buffer, "print\n") == 0) {
-                      print_list(list);
-                      break;
+              if (strcmp(buffer, "print") == 0)
+              {
+                      WordListPrint(list);
               }
-              if (strcmp(buffer, "line\n") == 0) {
+              else if (strcmp(buffer, "line") == 0)
+              {
                       printf("%d\n", curr_line);
               }
+              else
+              {
+                      if (is_prime(curr_line))
+                      {
+                              bool success = WordListRemove(&list, buffer);
+                              printf("trying to delete %s: %s\n", buffer,
+                                              success ? "deleted" : "not found");
+                      }
+                      else
+                      {
+                              bool added = WordListAppend(&list, buffer);
+                              printf("%s %s\n", added ? "added" : "counted", buffer);
+                      }
 
-              add_to_list(&list, buffer);
+                      curr_line++;
+              }
       }
+
+      // TODO: implement
+      WordListPrintResult(list);
+
+      WordListFree(&list);
 }
