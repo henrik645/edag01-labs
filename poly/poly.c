@@ -27,11 +27,6 @@ poly_t *poly_t_new(int coeff, int degree)
 
 typedef struct
 {
-        int offset;
-} Parser;
-
-typedef struct
-{
         bool successful;
         union {
                 poly_t *p;
@@ -55,15 +50,10 @@ ParserResult ParserResultNew(bool successful, const char *rest)
         return ret;
 }
 
-void ParserInit(Parser *p)
-{
-        p->offset = 0;
-}
-
-ParserResult ParserParseNumber(Parser *p, const char *input)
+ParserResult ParserParseNumber(const char *input)
 {
         int num = 0;
-        int offset = p->offset;
+        int offset = 0;
 
         if (!isdigit(input[offset]))
         {
@@ -80,44 +70,43 @@ ParserResult ParserParseNumber(Parser *p, const char *input)
         res.result.num = num;
         res.type = PARSER_RESULT_NUM;
 
-        /* printf("ParserParseNumber: %d\n", num); */
         return res;
 }
 
-ParserResult ParserParseChar(Parser *p, const char *input, char c)
+ParserResult ParserParseChar(const char *input, char c)
 {
-        if (input[p->offset] == c)
+        if (input[0] == c)
         {
-                /* printf("ParserParseChar: %c\n", c); */
                 return ParserResultNew(true, input + 1);
         }
-        else return ParserResultNew(false, input);
+
+        return ParserResultNew(false, input);
 }
 
-ParserResult ParserParseTerm(Parser *p, const char *input)
+ParserResult ParserParseTerm(const char *input)
 {
         ParserResult res;
         int degree = 0;
         int coeff = 1;
         bool successful = false;
 
-        res = ParserParseNumber(p, input);
+        res = ParserParseNumber(input);
         if (res.successful)
         {
                 successful = true;
                 coeff = res.result.num;
         }
 
-        res = ParserParseChar(p, res.rest, 'x');
+        res = ParserParseChar(res.rest, 'x');
         if (res.successful)
         {
                 successful = true;
                 degree = 1;
 
-                res = ParserParseChar(p, res.rest, '^');
+                res = ParserParseChar(res.rest, '^');
                 if (res.successful)
                 {
-                        res = ParserParseNumber(p, res.rest);
+                        res = ParserParseNumber(res.rest);
                         if (!res.successful) return ParserResultNew(false, input);
 
                         degree = res.result.num;
@@ -130,30 +119,27 @@ ParserResult ParserParseTerm(Parser *p, const char *input)
                 ret.result.p = poly_t_new(coeff, degree);
                 ret.type = PARSER_RESULT_POLY;
 
-                /* printf("ParserParseTerm: "); */
-                /* print_poly(ret.result.p); */
-
                 return ret;
         }
         return ParserResultNew(false, input);
 }
 
-ParserResult ParserParseWhitespace(Parser *p, const char *input)
+ParserResult ParserParseWhitespace(const char *input)
 {
-        int offset = p->offset;
+        int offset = 0;
 
         while (input[offset] != '\0' && isspace(input[offset])) offset++;
 
         return ParserResultNew(true, input + offset);
 }
 
-ParserResult ParserParsePoly(Parser *p, const char *input)
+ParserResult ParserParsePoly(const char *input)
 {
         ParserResult res;
         poly_t *head = NULL;
         bool negative = false;
 
-        res = ParserParseTerm(p, input);
+        res = ParserParseTerm(input);
         if (!res.successful)
                 return ParserResultNew(false, input);
 
@@ -163,20 +149,20 @@ ParserResult ParserParsePoly(Parser *p, const char *input)
         {
                 negative = false;
 
-                res = ParserParseWhitespace(p, res.rest);
+                res = ParserParseWhitespace(res.rest);
 
-                res = ParserParseChar(p, res.rest, '+');
+                res = ParserParseChar(res.rest, '+');
                 if (!res.successful)
                 {
-                        res = ParserParseChar(p, res.rest, '-');
+                        res = ParserParseChar(res.rest, '-');
                         if (!res.successful)
                                 break;
                         negative = true;
                 }
 
-                res = ParserParseWhitespace(p, res.rest);
+                res = ParserParseWhitespace(res.rest);
 
-                res = ParserParseTerm(p, res.rest);
+                res = ParserParseTerm(res.rest);
                 if (!res.successful) break;
 
                 poly_t* new_p = res.result.p;
@@ -189,8 +175,6 @@ ParserResult ParserParsePoly(Parser *p, const char *input)
                 while (node->next != NULL) node = node->next;
 
                 node->next = new_p;
-
-                res = ParserParseTerm(p, res.rest);
         }
 
         ParserResult ret = ParserResultNew(true, res.rest);
@@ -202,11 +186,8 @@ ParserResult ParserParsePoly(Parser *p, const char *input)
 
 poly_t* new_poly_from_string(const char* s)
 {
-        Parser p;
-        ParserInit(&p);
-
-        ParserResult res = ParserParsePoly(&p, s);
-        if (!res.successful && res.type == PARSER_RESULT_POLY)
+        ParserResult res = ParserParsePoly(s);
+        if (!res.successful && res.type != PARSER_RESULT_POLY)
                 return NULL;
 
         return res.result.p;
@@ -235,12 +216,7 @@ int poly_max_degree(poly_t *p)
 
 poly_t* mul(poly_t* p1, poly_t* p2)
 {
-
-        int max_degree_p1 = poly_max_degree(p1);
-        int max_degree_p2 = poly_max_degree(p2);
-
-        int max_degree = max_degree_p1 + max_degree_p2;
-
+        int max_degree = poly_max_degree(p1) + poly_max_degree(p2);
         int *coeffs = calloc(max_degree + 1, sizeof(int));
 
         for (poly_t *p1_term = p1; p1_term != NULL; p1_term = p1_term->next)
@@ -269,60 +245,30 @@ poly_t* mul(poly_t* p1, poly_t* p2)
         return first;
 }
 
-void print_space(bool *space)
-{
-        if (!(*space))
-        {
-                /* printf(" "); */
-                *space = true;
-        }
-}
-
 void print_poly(poly_t* p)
 {
         bool first = true;
-        bool space = false; // if last character is a space
-        /* printf("|"); */
         for (poly_t *node = p; node != NULL; node = node->next)
         {
                 if (node->coeff < 0)
-                {
-                        print_space(&space);
                         printf(" - ");
-                }
                 if (!first && node->coeff > 0)
-                {
-                        print_space(&space);
                         printf(" + ");
-                }
                 if (abs(node->coeff) != 1 || node->degree == 0)
-                {
                         printf("%d", abs(node->coeff));
-                        print_space(&space);
-                }
                 if (node->degree > 0)
-                {
                         printf("x");
-                        space = false;
-                }
                 if (node->degree > 1)
-                {
                         printf("^%d", node->degree);
-                        space = false;
-                }
                 first = false;
         }
-        /* printf("|"); */
         puts("");
 }
 
 static bool ParserTest(const char *exp)
 {
-        Parser p;
-        ParserInit(&p);
-
         printf("%s\n", exp);
-        ParserResult res = ParserParsePoly(&p, exp);
+        ParserResult res = ParserParsePoly(exp);
         printf("result: %s, rest: \"%s\"\n", res.successful ? "true" : "false", res.rest);
 
         if (res.type == PARSER_RESULT_POLY)
