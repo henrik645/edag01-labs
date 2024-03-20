@@ -1,5 +1,6 @@
 CC	= cc
 CFLAGS	= -std=c11 -pedantic -Wall -Werror -g -O3 -funsigned-char
+CFLAGS	= -std=c11 -pedantic -Wall -Werror -g -funsigned-char
 OUT	= a.out
 FILE	= poly
 
@@ -15,6 +16,12 @@ $(FILE).o: $(FILE).c
 
 malloc.o: malloc.c
 	$(CC) -c malloc.c $(CFLAGS) 
+
+test: poly.o malloc.o
+	$(CC) poly.o $(CFLAGS) malloc.o -o test
+
+runtest: test
+	./test
 
 clean:
 	rm -f *.s *.o $(OUT) output
